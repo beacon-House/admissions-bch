@@ -1,4 +1,4 @@
-// Environment variable validation
+// Required environment variables
 const requiredEnvVars = [
   'VITE_WEBHOOK_URL',
   'VITE_ENVIRONMENT',
@@ -19,7 +19,7 @@ export function validateEnv() {
 
 // Export typed environment variables
 export const env = {
-  WEBHOOK_URL: import.meta.env.VITE_WEBHOOK_URL as string,
-  ENVIRONMENT: import.meta.env.VITE_ENVIRONMENT as string,
-  META_PIXEL_ID: import.meta.env.VITE_META_PIXEL_ID as string,
+  WEBHOOK_URL: import.meta.env.VITE_WEBHOOK_URL,
+  ENVIRONMENT: import.meta.env.VITE_ENVIRONMENT,
+  META_PIXEL_ID: import.meta.env.VITE_META_PIXEL_ID,
 } as const;
