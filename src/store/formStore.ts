@@ -8,6 +8,7 @@ interface FormState {
   isSubmitting: boolean;
   isSubmitted: boolean;
   startTime: number;
+  stepStartTimes: Record<number, number>;
   setStep: (step: number) => void;
   updateFormData: (data: Partial<CompleteFormData>) => void;
   setSubmitting: (isSubmitting: boolean) => void;
@@ -22,8 +23,12 @@ export const useFormStore = create<FormState>((set, get) => ({
   isSubmitting: false,
   isSubmitted: false,
   startTime: Date.now(),
+  stepStartTimes: { 1: Date.now() },
   
-  setStep: (step) => set({ currentStep: step }),
+  setStep: (step) => set((state) => ({
+    currentStep: step,
+    stepStartTimes: { ...state.stepStartTimes, [step]: Date.now() }
+  })),
   
   updateFormData: (data) => set((state) => ({
     formData: { ...state.formData, ...data }

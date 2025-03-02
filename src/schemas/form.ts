@@ -36,6 +36,8 @@ export const commitmentSchema = z.object({
   targetUniversityRank: z.enum(TARGET_UNIVERSITY_RANKS),
   scholarshipRequirement: z.enum(SCHOLARSHIP_REQUIREMENTS),
   timelineCommitment: z.enum(TIMELINE_COMMITMENTS),
+  consultationDate: z.string().optional(),
+  consultationTime: z.string().optional(),
 });
 
 // Complete Form Schema

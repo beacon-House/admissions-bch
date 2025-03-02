@@ -3,7 +3,8 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { Label } from '../ui/label';
-import { ChevronLeft, ChevronRight, Building } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Building, Calendar, Clock } from 'lucide-react';
+import { CalendarSlotPicker } from '../CalendarSlotPicker';
 import {
   Select,
   SelectContent,
@@ -28,6 +29,7 @@ const commitmentSchema = z.object({
   targetUniversityRank: z.enum(['top_20', 'top_50', 'top_100', 'any_good']),
   scholarshipRequirement: z.enum(['good_to_have', 'must_have']),
   timelineCommitment: z.enum(['immediate_start', 'within_3_months', 'still_exploring']),
+  consultationSlot: z.date().optional(),
 });
 
 export type CommitmentData = z.infer<typeof commitmentSchema>;
@@ -42,6 +44,7 @@ export function CommitmentForm({ onSubmit, onBack, defaultValues }: CommitmentFo
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors },
     setValue,
   } = useForm<CommitmentData>({
@@ -49,12 +52,24 @@ export function CommitmentForm({ onSubmit, onBack, defaultValues }: CommitmentFo
     defaultValues
   });
 
+  const consultationSlot = watch('consultationSlot');
+
+  const handleFormSubmit = (data: CommitmentData) => {
+    // Ensure we have all required data before submitting
+    if (!data.preferredCountries || !data.targetUniversityRank || 
+        !data.scholarshipRequirement || !data.timelineCommitment) {
+      return;
+    }
+    onSubmit(data);
+  };
+
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+    <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-6">
       <div className="flex items-center space-x-2 mb-6">
         <Building className="w-6 h-6 text-primary" />
         <h3 className="text-xl font-semibold text-primary">Commitment & Investment</h3>
       </div>
+
 
       <div className="space-y-6">
         <div className="space-y-2">
@@ -138,6 +153,28 @@ export function CommitmentForm({ onSubmit, onBack, defaultValues }: CommitmentFo
             <p className="text-sm text-red-500">{errors.timelineCommitment.message}</p>
           )}
         </div>
+
+        <div className="mt-12 p-6 bg-primary/5 rounded-xl space-y-4">
+          <div className="flex items-center space-x-3 mb-4">
+            <Calendar className="w-5 h-5 text-primary" />
+            <h4 className="text-lg font-semibold text-primary">Book Your Free Strategy Session</h4>
+          </div>
+          
+          <p className="text-gray-600">
+            Take the first step towards your dream university! Schedule a personalized 1-on-1 consultation 
+            with our expert counselors to discuss your profile and create a winning strategy.
+          </p>
+
+          <CalendarSlotPicker
+            value={consultationSlot}
+            onChange={(date) => setValue('consultationSlot', date)}
+            className="mb-4"
+          />
+          {errors.consultationSlot && (
+            <p className="text-sm text-red-500">{errors.consultationSlot.message}</p>
+          )}
+        </div>
+
       </div>
 
       <div className="flex justify-between mt-8">

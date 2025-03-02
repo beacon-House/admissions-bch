@@ -17,6 +17,7 @@ export default function FormContainer() {
     isSubmitting,
     isSubmitted,
     startTime,
+    stepStartTimes,
     setStep,
     updateFormData,
     setSubmitting,
@@ -37,7 +38,7 @@ export default function FormContainer() {
       // If user is applying for masters or grade 7 below, submit form immediately
       if (data.currentGrade === 'masters' || data.currentGrade === '7_below') {
         setSubmitting(true);
-        await submitFormData(data, 1, startTime);
+        await submitFormData(data, 1, startTime, stepStartTimes);
         setSubmitting(false);
         setSubmitted(true);
         return;
@@ -101,7 +102,7 @@ export default function FormContainer() {
         finalData.curriculumType
       );
       const enrichedData = { ...finalData, lead_category: leadCategory };
-      await submitFormData(enrichedData, 3, startTime, true);
+      await submitFormData(enrichedData, 3, startTime, stepStartTimes, true);
       setSubmitting(false);      
       setSubmitted(true);
     } catch (error) {

@@ -43,6 +43,7 @@ export interface CommitmentFormData {
   targetUniversityRank: typeof TARGET_UNIVERSITY_RANKS[number];
   scholarshipRequirement: typeof SCHOLARSHIP_REQUIREMENTS[number];
   timelineCommitment: typeof TIMELINE_COMMITMENTS[number];
+  consultationSlot?: Date;
 }
 
 // Combined form data type
