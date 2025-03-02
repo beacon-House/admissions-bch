@@ -1,7 +1,6 @@
 import { LeadCategory, CompleteFormData } from '@/types/form';
 import { personalDetailsSchema, academicDetailsSchema, commitmentSchema } from '@/schemas/form';
 import { ZodError } from 'zod';
-import { env } from './env';
 
 export class FormValidationError extends Error {
   constructor(public errors: { [key: string]: string[] }) {
@@ -18,7 +17,10 @@ export const submitFormData = async (
   stepStartTimes: Record<number, number>,
   isComplete: boolean = false
 ): Promise<Response> => {
-  const webhookUrl = env.WEBHOOK_URL;
+  const webhookUrl = import.meta.env.VITE_REGISTRATION_WEBHOOK_URL?.trim();
+  if (!webhookUrl) {
+    throw new Error('Form submission URL not configured. Please check environment variables.');
+  }
 
   const currentTime = Math.floor((Date.now() - startTime) / 1000);
   const now = Date.now();
