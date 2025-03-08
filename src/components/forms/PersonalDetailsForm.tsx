@@ -67,7 +67,7 @@ export function PersonalDetailsForm({ onSubmit, defaultValues }: PersonalDetails
       </div>
 
       <div className="space-y-2">
-        <Label>Current Grade</Label>
+        <Label>Grade in Academic Year 25-26</Label>
         <Select onValueChange={(value) => setValue('currentGrade', value as PersonalDetailsData['currentGrade'])}>
           <SelectTrigger className="h-12 bg-white">
             <SelectValue placeholder="Select your current grade" />
