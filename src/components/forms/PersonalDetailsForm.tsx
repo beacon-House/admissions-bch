@@ -70,7 +70,7 @@ export function PersonalDetailsForm({ onSubmit, defaultValues }: PersonalDetails
         <Label>Grade in Academic Year 25-26</Label>
         <Select onValueChange={(value) => setValue('currentGrade', value as PersonalDetailsData['currentGrade'])}>
           <SelectTrigger className="h-12 bg-white">
-            <SelectValue placeholder="Select your current grade" />
+            <SelectValue placeholder="Select Grade in Academic Year 25-26" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="12">Grade 12</SelectItem>
