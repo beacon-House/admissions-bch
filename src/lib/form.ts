@@ -1,6 +1,12 @@
 import { LeadCategory, CompleteFormData } from '@/types/form';
 import { personalDetailsSchema, academicDetailsSchema } from '@/schemas/form';
 import { ZodError } from 'zod';
+import { 
+  validateLeadCategory, 
+  sanitizeLeadCategory, 
+  logLeadCategoryError,
+  validateFormDataConsistency 
+} from './dataValidation';
 
 export class FormValidationError extends Error {
   constructor(public errors: { [key: string]: string[] }) {
@@ -30,6 +36,39 @@ export const submitFormData = async (
   const webhookUrl = import.meta.env.VITE_REGISTRATION_WEBHOOK_URL?.trim();
   if (!webhookUrl) {
     throw new Error('Form submission URL not configured. Please check environment variables.');
+  }
+  
+  // Validate and sanitize lead category before webhook submission
+  const originalCategory = data.lead_category;
+  const sanitizedCategory = sanitizeLeadCategory(originalCategory);
+  
+  if (originalCategory && !sanitizedCategory) {
+    logLeadCategoryError(
+      'Webhook Submission - Invalid Category',
+      originalCategory,
+      undefined, // No session ID available here
+      { step, isComplete }
+    );
+  }
+  
+  // Validate complete form data consistency
+  const consistencyCheck = validateFormDataConsistency({
+    ...data,
+    lead_category: sanitizedCategory
+  });
+  
+  if (!consistencyCheck.isValid) {
+    logLeadCategoryError(
+      'Webhook Submission - Data Consistency',
+      sanitizedCategory,
+      undefined,
+      { 
+        errors: consistencyCheck.errors,
+        warnings: consistencyCheck.warnings,
+        step,
+        isComplete 
+      }
+    );
   }
 
   const currentTime = Math.floor((Date.now() - startTime) / 1000);
@@ -129,7 +168,7 @@ export const submitFormData = async (
     }),
     
     // Lead categorization
-    lead_category: data.lead_category,
+    lead_category: sanitizedCategory,
     
     // Counselling data
     counsellingSlotPicked: counsellingSlotPicked,
@@ -148,6 +187,11 @@ export const submitFormData = async (
   };
 
   console.log('Sending webhook data:', formattedPayload);
+  
+  // Log the lead category being sent to webhook for tracking
+  if (sanitizedCategory) {
+    console.log(`Webhook submission: Lead category "${sanitizedCategory}" for step ${step}`);
+  }
 
   const response = await fetch(webhookUrl, {
     method: 'POST',
@@ -166,6 +210,11 @@ export const submitFormData = async (
       errorText
     });
     throw new Error(`Form submission failed: ${response.status} ${response.statusText}`);
+  }
+  
+  // Log successful webhook submission with category
+  if (sanitizedCategory) {
+    console.log(`Webhook success: Lead category "${sanitizedCategory}" submitted successfully`);
   }
 
   return response;

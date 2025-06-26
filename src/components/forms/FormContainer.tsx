@@ -24,6 +24,7 @@ import { submitFormData, validateForm, FormValidationError } from '@/lib/form';
 import { determineLeadCategory } from '@/lib/leadCategorization';
 import { toast } from '@/components/ui/toast';
 import { ExtendedNurtureData } from './ExtendedNurtureForm';
+import { trackStep } from '@/lib/formTracking';
 
 export default function FormContainer() {
   const {
@@ -33,6 +34,7 @@ export default function FormContainer() {
     isSubmitted,
     startTime,
     triggeredEvents,
+    sessionId,
     setStep,
     updateFormData,
     setSubmitting,
@@ -51,6 +53,10 @@ export default function FormContainer() {
     try {
       await validateForm(1, data);
       updateFormData(data);
+      
+      // Track step 1 completion
+      const completeStep1Data = { ...formData, ...data, startTime };
+      trackStep(sessionId, 1, 'personal_details', completeStep1Data);
       
       // Track new student lead event
       if (data.formFillerType === 'student') {
@@ -106,6 +112,10 @@ export default function FormContainer() {
         // Update form data with lead category
         updateFormData({ lead_category: leadCategory });
         
+        // Track direct submit for grade 7 below
+        const finalData = { ...formData, ...data, lead_category: leadCategory, startTime };
+        trackStep(sessionId, 1, 'direct_submit_grade7', finalData);
+        
         // Submit form with lead category
         await submitFormData({...data, lead_category: leadCategory}, 1, startTime, true, triggeredEvents);
         setSubmitting(false);
@@ -138,53 +148,53 @@ export default function FormContainer() {
         await validateForm(2, data);
       }
       
-      // Combine form data
-      const finalData = { ...formData, ...data };
+      // Combine form data BEFORE lead categorization
+      const combinedFormData = { ...formData, ...data };
       
       // CRITICAL: Track events IMMEDIATELY after finalData is available, before any early returns
       // Track spammy parent event (GPA=10 or Percentage=100)
-      if (finalData.formFillerType === 'parent' && (finalData.gpaValue === "10" || finalData.percentageValue === "100")) {
+      if (combinedFormData.formFillerType === 'parent' && (combinedFormData.gpaValue === "10" || combinedFormData.percentageValue === "100")) {
         trackPixelEvent({
           name: PIXEL_EVENTS.SPAMMY_PARENT,
           options: {
-            ...getCommonEventProperties(finalData),
-            gpa_value: finalData.gpaValue,
-            percentage_value: finalData.percentageValue
+            ...getCommonEventProperties(combinedFormData),
+            gpa_value: combinedFormData.gpaValue,
+            percentage_value: combinedFormData.percentageValue
           }
         });
       }
       
       // Track stateboard parent event
-      if (finalData.formFillerType === 'parent' && finalData.curriculumType === 'State_Boards') {
+      if (combinedFormData.formFillerType === 'parent' && combinedFormData.curriculumType === 'State_Boards') {
         trackPixelEvent({
           name: PIXEL_EVENTS.STATEBOARD_PARENT,
-          options: getCommonEventProperties(finalData)
+          options: getCommonEventProperties(combinedFormData)
         });
       }
       
       // Determine lead category
       const leadCategory = formData.currentGrade === 'masters' 
         ? determineLeadCategory(
-            finalData.currentGrade,
-            finalData.formFillerType,
-            finalData.scholarshipRequirement,
-            finalData.curriculumType,
+            combinedFormData.currentGrade,
+            combinedFormData.formFillerType,
+            combinedFormData.scholarshipRequirement,
+            combinedFormData.curriculumType,
             undefined, // targetUniversityRank not used for masters
-            finalData.gpaValue,
-            finalData.percentageValue,
-            finalData.intake,
-            finalData.applicationPreparation,
-            finalData.targetUniversities,
-            finalData.supportLevel
+            combinedFormData.gpaValue,
+            combinedFormData.percentageValue,
+            combinedFormData.intake,
+            combinedFormData.applicationPreparation,
+            combinedFormData.targetUniversities,
+            combinedFormData.supportLevel
           )
         : determineLeadCategory(
-            finalData.currentGrade,
-            finalData.formFillerType,
-            finalData.scholarshipRequirement,
-            finalData.curriculumType,
-            finalData.targetUniversityRank,
-            finalData.gpaValue,
-            finalData.percentageValue
+            combinedFormData.currentGrade,
+            combinedFormData.formFillerType,
+            combinedFormData.scholarshipRequirement,
+            combinedFormData.curriculumType,
+            combinedFormData.targetUniversityRank,
+            combinedFormData.gpaValue,
+            combinedFormData.percentageValue
           );
       
       // Save lead category to state
@@ -195,6 +205,12 @@ export default function FormContainer() {
         ...data,
         lead_category: leadCategory 
       });
+      
+      // Create final data object with the determined lead category for all subsequent operations
+      const finalData = { 
+        ...combinedFormData, 
+        lead_category: leadCategory 
+      };
       
       // Track qualified lead event for bch, lum-l1, or lum-l2 categories
       if (['bch', 'lum-l1', 'lum-l2'].includes(leadCategory)) {
@@ -232,15 +248,18 @@ export default function FormContainer() {
       // NEW: If form is filled by student, submit immediately regardless of other conditions
       if (finalData.formFillerType === 'student') {
         setSubmitting(true);
-        await submitFormData({
-          ...formData,
-          ...data,
-          lead_category: leadCategory
-        }, 2, startTime, true, triggeredEvents);
+        
+        // Track student direct submit
+        trackStep(sessionId, 2, 'student_direct_submit', finalData);
+        
+        await submitFormData(finalData, 2, startTime, true, triggeredEvents);
         setSubmitting(false);
         setSubmitted(true);
         return;
       }
+      
+      // Track step 2 completion for parent-filled forms
+      trackStep(sessionId, 2, formData.currentGrade === 'masters' ? 'academic_masters' : 'academic_regular', finalData);
 
       // Different flows based on lead category and grade
       if (leadCategory === 'nurture') {
@@ -249,11 +268,11 @@ export default function FormContainer() {
         if (finalData.gpaValue === "10" || finalData.percentageValue === "100") {
           // Spam lead - submit directly
           setSubmitting(true);
-          await submitFormData({
-            ...formData,
-            ...data,
-            lead_category: leadCategory
-          }, 2, startTime, true, triggeredEvents);
+          
+          // Track spam lead direct submit with correct lead category
+          trackStep(sessionId, 2, 'spam_direct_submit', finalData);
+          
+          await submitFormData(finalData, 2, startTime, true, triggeredEvents);
           setSubmitting(false);
           setSubmitted(true);
         } else if (['11', '12'].includes(formData.currentGrade || '') && finalData.formFillerType === 'parent') {
@@ -272,11 +291,11 @@ export default function FormContainer() {
         } else {
           // For all other grades (8, 9, 10, masters) with nurture category, submit directly
           setSubmitting(true);
-          await submitFormData({
-            ...formData,
-            ...data,
-            lead_category: leadCategory
-          }, 2, startTime, true, triggeredEvents);
+          
+          // Track direct submit for nurture leads
+          trackStep(sessionId, 2, 'nurture_direct_submit', finalData);
+          
+          await submitFormData(finalData, 2, startTime, true, triggeredEvents);
           setSubmitting(false);
           setSubmitted(true);
         }
@@ -307,15 +326,18 @@ export default function FormContainer() {
     try {
       window.scrollTo(0, 0);
       
+      // Combine current form data with extended nurture data BEFORE re-categorization
+      const combinedFormData = { ...formData };
+      
       // Re-categorize the lead based on extended nurture form responses
       const recategorizedLeadCategory = determineLeadCategory(
-        formData.currentGrade!,
-        formData.formFillerType!,
-        formData.scholarshipRequirement!,
-        formData.curriculumType!,
-        formData.targetUniversityRank,
-        formData.gpaValue,
-        formData.percentageValue,
+        combinedFormData.currentGrade!,
+        combinedFormData.formFillerType!,
+        combinedFormData.scholarshipRequirement!,
+        combinedFormData.curriculumType!,
+        combinedFormData.targetUniversityRank,
+        combinedFormData.gpaValue,
+        combinedFormData.percentageValue,
         undefined, // intake
         undefined, // applicationPreparation
         undefined, // targetUniversities
@@ -331,6 +353,16 @@ export default function FormContainer() {
         }
       });
       
+      // Create final data object with the re-categorized lead category for all subsequent operations
+      const finalExtendedNurtureData = {
+        ...combinedFormData,
+        lead_category: recategorizedLeadCategory,
+        extendedNurture: { ...data }
+      };
+      
+      // Track extended nurture form completion
+      trackStep(sessionId, 2.5, 'extended_nurture', finalExtendedNurtureData);
+      
       // Track qualified lead event for bch, lum-l1, or lum-l2 categories after re-categorization
       if (['bch', 'lum-l1', 'lum-l2'].includes(recategorizedLeadCategory)) {
         trackPixelEvent({
@@ -338,7 +370,7 @@ export default function FormContainer() {
           options: {
             lead_category: recategorizedLeadCategory,
             total_time_spent: Math.floor((Date.now() - startTime) / 1000),
-            ...getCommonEventProperties(formData)
+            ...getCommonEventProperties(finalExtendedNurtureData)
           }
         });
       }
@@ -347,13 +379,11 @@ export default function FormContainer() {
       if (recategorizedLeadCategory === 'nurture') {
         // Submit the form directly
         setSubmitting(true);
-        await submitFormData({
-          ...formData,
-          lead_category: recategorizedLeadCategory,
-          extendedNurture: {
-            ...data
-          }
-        }, 2.5, startTime, true, triggeredEvents);
+        
+        // Track nurture re-categorization direct submit with correct lead category
+        trackStep(sessionId, 2.5, 'nurture_recategorized_submit', finalExtendedNurtureData);
+        
+        await submitFormData(finalExtendedNurtureData, 2.5, startTime, true, triggeredEvents);
         setSubmitting(false);
         setSubmitted(true);
       } else {
@@ -371,13 +401,16 @@ export default function FormContainer() {
       setSubmitting(true);
       
       // Prepare final data for submission
-      const finalData = {
+      const finalSubmissionData = {
         ...formData,
         counselling: {
           selectedDate: data.selectedDate,
           selectedSlot: data.selectedSlot
         }
       };
+      
+      // Track final submission
+      trackStep(sessionId, 3, 'final_submit', finalSubmissionData);
       
       // Track page3 submit event with lead category
       trackPixelEvent({
@@ -441,7 +474,7 @@ export default function FormContainer() {
       }
       
       // Submit all form data including counselling details
-      await submitFormData(finalData, 3, startTime, true, triggeredEvents);
+      await submitFormData(finalSubmissionData, 3, startTime, true, triggeredEvents);
       
       setSubmitting(false);
       setSubmitted(true);

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { CompleteFormData } from '@/types/form';
 import { validateFormStep } from '@/lib/form';
+import { generateSessionId } from '@/lib/formTracking';
 
 interface FormState {
   currentStep: number;
@@ -9,6 +10,7 @@ interface FormState {
   isSubmitted: boolean;
   startTime: number;
   triggeredEvents: string[];
+  sessionId: string;
   setStep: (step: number) => void;
   updateFormData: (data: Partial<CompleteFormData>) => void;
   setSubmitting: (isSubmitting: boolean) => void;
@@ -25,6 +27,7 @@ export const useFormStore = create<FormState>((set, get) => ({
   isSubmitted: false,
   startTime: Date.now(),
   triggeredEvents: [],
+  sessionId: generateSessionId(),
   
   setStep: (step) => {
     set({ currentStep: step });
@@ -50,7 +53,8 @@ export const useFormStore = create<FormState>((set, get) => ({
     isSubmitting: false,
     isSubmitted: false,
     startTime: Date.now(),
-    triggeredEvents: []
+    triggeredEvents: [],
+    sessionId: generateSessionId()
   }),
   
   canProceed: (step) => validateFormStep(step, get().formData)
