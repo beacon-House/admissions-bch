@@ -1,13 +1,14 @@
 /**
- * Form Submission and Validation Library v8.0
+ * Form Submission and Validation Library - Fixed for Consistent Field Names
  * 
- * Purpose: Handles form submission with the new simplified webhook payload structure.
- * Supports both qualified and disqualified lead flows.
+ * Purpose: Handles form submission with consistent snake_case field names
+ * that match the database schema exactly.
  * 
  * Changes made:
- * - Updated webhook payload for simplified form structure
- * - Added counselor assignment logic
- * - Simplified payload structure for 2-page form
+ * - Fixed field name consistency (snake_case for webhook payload)
+ * - Simplified webhook payload structure
+ * - Removed complex field mapping
+ * - Clean separation between frontend and backend field names
  */
 
 import { LeadCategory, CompleteFormData } from '@/types/form';
@@ -27,7 +28,7 @@ export class FormValidationError extends Error {
   }
 }
 
-// Form submission helper
+// Form submission helper with consistent field names
 export const submitFormData = async (
   data: Partial<CompleteFormData>,
   step: number,
@@ -53,94 +54,69 @@ export const submitFormData = async (
     );
   }
   
-  // Validate complete form data consistency
-  const consistencyCheck = validateFormDataConsistency({
-    ...data,
-    lead_category: sanitizedCategory
-  });
-  
-  if (!consistencyCheck.isValid) {
-    logLeadCategoryError(
-      'Webhook Submission - Data Consistency',
-      sanitizedCategory,
-      undefined,
-      { 
-        errors: consistencyCheck.errors,
-        warnings: consistencyCheck.warnings,
-        step,
-        isComplete 
-      }
-    );
-  }
-
-  const currentTime = Math.floor((Date.now() - startTime) / 1000);
-  
-  // Determine if this is a qualified lead
+  // Determine if this is a qualified lead and if counseling is booked
   const isQualifiedLead = ['bch', 'lum-l1', 'lum-l2'].includes(sanitizedCategory || '');
+  const isCounsellingBooked = Boolean(data.selectedDate && data.selectedSlot);
   
-  // Parse counselling data for webhook
-  const counsellingSlotPicked = Boolean(
-    data.selectedDate && data.selectedSlot
-  );
-  
-  // Determine counselor assignment
-  let counselorAssigned = null;
-  if (isQualifiedLead) {
-    counselorAssigned = sanitizedCategory === 'bch' ? 'Viswanathan' : 'Karthik Lakshman';
+  // Determine funnel stage
+  let funnelStage = 'initial_capture';
+  if (step === 2) {
+    if (isCounsellingBooked) {
+      funnelStage = 'counseling_booked';
+    } else {
+      funnelStage = 'contact_submitted';
+    }
+  }
+  if (isComplete) {
+    funnelStage = 'completed';
   }
 
-  // Create the webhook payload
+  // Create the webhook payload with consistent snake_case field names matching database
   const webhookPayload: Record<string, any> = {
-    // Page 1: Initial Lead Capture Data (always present)
-    formFillerType: data.formFillerType,
-    studentFirstName: data.studentFirstName,
-    studentLastName: data.studentLastName,
-    currentGrade: data.currentGrade,
-    curriculumType: data.curriculumType,
-    gradeFormat: data.gradeFormat,
-    gpaValue: data.gpaValue || null,
-    percentageValue: data.percentageValue || null,
-    schoolName: data.schoolName,
-    scholarshipRequirement: data.scholarshipRequirement,
-    targetGeographies: Array.isArray(data.targetGeographies) ? data.targetGeographies : [],
-    phoneNumber: data.phoneNumber,
-    
-    // Page 2: Contact Information (present for step 2)
-    parentName: data.parentName || null,
-    email: data.email || null,
-    
-    // Page 2A: Counseling Data (only for qualified leads)
-    counsellingDate: isQualifiedLead ? (data.selectedDate || null) : null,
-    counsellingTime: isQualifiedLead ? (data.selectedSlot || null) : null,
-    counsellingSlotPicked: isQualifiedLead ? counsellingSlotPicked : false,
-    counselor_assigned: counselorAssigned,
-    
-    // System Generated Data
-    lead_category: sanitizedCategory,
+    // Core session data
     session_id: data.sessionId || crypto.randomUUID(),
     environment: import.meta.env.VITE_ENVIRONMENT?.trim() || 'staging',
-    total_time_spent: currentTime,
-    created_at: new Date().toISOString(),
-    step_completed: step,
     
-    // Analytics Data
-    triggeredEvents: triggeredEvents.length > 0 ? triggeredEvents : null,
+    // Page 1: Student Information (snake_case)
+    form_filler_type: data.formFillerType,
+    student_first_name: data.studentFirstName,
+    student_last_name: data.studentLastName,
+    current_grade: data.currentGrade,
+    phone_number: data.phoneNumber,
     
-    // Form Metadata
-    form_version: 'v8.0',
+    // Page 1: Academic Information (snake_case)
+    curriculum_type: data.curriculumType,
+    grade_format: data.gradeFormat,
+    gpa_value: data.gpaValue || null,
+    percentage_value: data.percentageValue || null,
+    school_name: data.schoolName,
+    
+    // Page 1: Study Preferences (snake_case)
+    scholarship_requirement: data.scholarshipRequirement,
+    target_geographies: Array.isArray(data.targetGeographies) ? data.targetGeographies : [],
+    
+    // Page 2: Parent Contact Information (snake_case)
+    parent_name: data.parentName || null,
+    parent_email: data.email || null, // Frontend uses 'email', webhook/DB uses 'parent_email'
+    
+    // Page 2A: Counseling Information (snake_case)
+    selected_date: isQualifiedLead ? (data.selectedDate || null) : null,
+    selected_slot: isQualifiedLead ? (data.selectedSlot || null) : null,
+    
+    // System Fields (snake_case)
+    lead_category: sanitizedCategory,
+    is_counselling_booked: isCounsellingBooked,
+    funnel_stage: funnelStage,
     is_qualified_lead: isQualifiedLead,
     page_completed: step,
-    funnel_stage: step === 1 ? 'initial_capture' : 
-                  (isQualifiedLead ? 'counseling_booked' : 'contact_submitted')
+    triggered_events: triggeredEvents.length > 0 ? triggeredEvents : [],
+    
+    // Timestamp
+    created_at: new Date().toISOString()
   };
 
   console.log('Sending webhook data:', webhookPayload);
   
-  // Log the lead category being sent to webhook for tracking
-  if (sanitizedCategory) {
-    console.log(`Webhook submission: Lead category "${sanitizedCategory}" for step ${step}`);
-  }
-
   const response = await fetch(webhookUrl, {
     method: 'POST',
     headers: {
@@ -160,11 +136,7 @@ export const submitFormData = async (
     throw new Error(`Form submission failed: ${response.status} ${response.statusText}`);
   }
   
-  // Log successful webhook submission with category
-  if (sanitizedCategory) {
-    console.log(`Webhook success: Lead category "${sanitizedCategory}" submitted successfully`);
-  }
-
+  console.log(`Webhook success: Lead category "${sanitizedCategory}" submitted successfully`);
   return response;
 };
 
@@ -227,19 +199,6 @@ export const validateFormStep = (
     }
   } catch {
     return false;
-  }
-};
-
-// Get counselor assignment based on lead category
-export const getCounselorAssignment = (leadCategory: LeadCategory): string | null => {
-  switch (leadCategory) {
-    case 'bch':
-      return 'Viswanathan';
-    case 'lum-l1':
-    case 'lum-l2':
-      return 'Karthik Lakshman';
-    default:
-      return null;
   }
 };
 
