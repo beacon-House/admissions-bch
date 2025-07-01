@@ -1,5 +1,17 @@
+/**
+ * Form Submission and Validation Library v8.0
+ * 
+ * Purpose: Handles form submission with the new simplified webhook payload structure.
+ * Supports both qualified and disqualified lead flows.
+ * 
+ * Changes made:
+ * - Updated webhook payload for simplified form structure
+ * - Added counselor assignment logic
+ * - Simplified payload structure for 2-page form
+ */
+
 import { LeadCategory, CompleteFormData } from '@/types/form';
-import { personalDetailsSchema, academicDetailsSchema } from '@/schemas/form';
+import { initialLeadCaptureSchema, qualifiedLeadSchema, disqualifiedLeadSchema } from '@/schemas/form';
 import { ZodError } from 'zod';
 import { 
   validateLeadCategory, 
@@ -14,16 +26,6 @@ export class FormValidationError extends Error {
     this.name = 'FormValidationError';
   }
 }
-
-// Function to map new scholarship requirements to old format for backwards compatibility
-const mapScholarshipRequirement = (value: string): string => {
-  if (value === 'full_scholarship') {
-    return 'must_have';
-  } else {
-    // Both 'partial_scholarship' and 'scholarship_optional' map to 'good_to_have'
-    return 'good_to_have';
-  }
-};
 
 // Form submission helper
 export const submitFormData = async (
@@ -46,7 +48,7 @@ export const submitFormData = async (
     logLeadCategoryError(
       'Webhook Submission - Invalid Category',
       originalCategory,
-      undefined, // No session ID available here
+      undefined,
       { step, isComplete }
     );
   }
@@ -72,121 +74,67 @@ export const submitFormData = async (
   }
 
   const currentTime = Math.floor((Date.now() - startTime) / 1000);
-
+  
+  // Determine if this is a qualified lead
+  const isQualifiedLead = ['bch', 'lum-l1', 'lum-l2'].includes(sanitizedCategory || '');
+  
   // Parse counselling data for webhook
   const counsellingSlotPicked = Boolean(
-    data.counselling?.selectedDate && data.counselling?.selectedSlot
+    data.selectedDate && data.selectedSlot
   );
   
-  // Get preferred communication methods
-  const preferredContactMethods = [];
-  const contactDetails = {};
-  
-  if (data.contactMethods) {
-    if (data.contactMethods.call) {
-      preferredContactMethods.push('call');
-      contactDetails.callNumber = data.contactMethods.callNumber || data.phoneNumber;
-    }
-    
-    if (data.contactMethods.whatsapp) {
-      preferredContactMethods.push('whatsapp');
-      contactDetails.whatsappNumber = data.contactMethods.whatsappNumber || data.phoneNumber;
-    }
-    
-    if (data.contactMethods.email) {
-      preferredContactMethods.push('email');
-      contactDetails.emailAddress = data.contactMethods.emailAddress || data.email;
-    }
+  // Determine counselor assignment
+  let counselorAssigned = null;
+  if (isQualifiedLead) {
+    counselorAssigned = sanitizedCategory === 'bch' ? 'Viswanathan' : 'Karthik Lakshman';
   }
 
-  // Store the original scholarship requirement value for webhook
-  const originalScholarshipRequirement = data.scholarshipRequirement;
-  
-  // Map the scholarship requirement for internal lead categorization only
-  let mappedScholarshipRequirement = null;
-  if (originalScholarshipRequirement) {
-    mappedScholarshipRequirement = mapScholarshipRequirement(originalScholarshipRequirement);
-  }
-
-  // Create a clean payload with just the data we need
-  const formattedPayload: Record<string, any> = {
-    // User-submitted data
+  // Create the webhook payload
+  const webhookPayload: Record<string, any> = {
+    // Page 1: Initial Lead Capture Data (always present)
+    formFillerType: data.formFillerType,
     studentFirstName: data.studentFirstName,
     studentLastName: data.studentLastName,
-    parentName: data.parentName,
-    email: data.email,
-    phoneNumber: data.phoneNumber,
-    areaOfResidence: data.areaOfResidence,
-    whatsappConsent: data.whatsappConsent,
     currentGrade: data.currentGrade,
-    formFillerType: data.formFillerType,
     curriculumType: data.curriculumType,
-    
-    // Additional form fields if available
-    schoolName: data.schoolName,
-    targetUniversityRank: data.targetUniversityRank,
-    preferredCountries: data.preferredCountries,
-    
-    // Add grade format data for ALL flows (masters and non-masters)
     gradeFormat: data.gradeFormat,
-    gpaValue: data.gpaValue,
-    percentageValue: data.percentageValue,
+    gpaValue: data.gpaValue || null,
+    percentageValue: data.percentageValue || null,
+    schoolName: data.schoolName,
+    scholarshipRequirement: data.scholarshipRequirement,
+    targetGeographies: Array.isArray(data.targetGeographies) ? data.targetGeographies : [],
+    phoneNumber: data.phoneNumber,
     
-    // Send original scholarship requirement value to webhook (not mapped)
-    scholarshipRequirement: originalScholarshipRequirement,
+    // Page 2: Contact Information (present for step 2)
+    parentName: data.parentName || null,
+    email: data.email || null,
     
-    // Store mapped value for internal reference only
-    mappedScholarshipRequirement: mappedScholarshipRequirement,
+    // Page 2A: Counseling Data (only for qualified leads)
+    counsellingDate: isQualifiedLead ? (data.selectedDate || null) : null,
+    counsellingTime: isQualifiedLead ? (data.selectedSlot || null) : null,
+    counsellingSlotPicked: isQualifiedLead ? counsellingSlotPicked : false,
+    counselor_assigned: counselorAssigned,
     
-    // Masters-specific fields
-    ...(data.currentGrade === 'masters' && {
-      intake: data.intake,
-      intakeOther: data.intakeOther,
-      graduationStatus: data.graduationStatus,
-      graduationYear: data.graduationYear,
-      workExperience: data.workExperience,
-      fieldOfStudy: data.fieldOfStudy,
-      entranceExam: data.entranceExam,
-      examScore: data.examScore,
-      applicationPreparation: data.applicationPreparation,
-      targetUniversities: data.targetUniversities,
-      supportLevel: data.supportLevel
-    }),
-    
-    // Extended nurture form data
-    ...(data.extendedNurture && {
-      // Student-specific fields
-      parentalSupport: data.extendedNurture.parentalSupport,
-      
-      // Unified for both student and parent
-      partialFundingApproach: data.extendedNurture.partialFundingApproach,
-      
-      // Renamed from gradeSpecificQuestion to strongProfileIntent
-      strongProfileIntent: data.extendedNurture.strongProfileIntent,
-      
-      extendedFormCompleted: true
-    }),
-    
-    // Lead categorization
+    // System Generated Data
     lead_category: sanitizedCategory,
-    
-    // Counselling data
-    counsellingSlotPicked: counsellingSlotPicked,
-    counsellingDate: data.counselling?.selectedDate || null,
-    counsellingTime: data.counselling?.selectedSlot || null,
-    preferredContactMethods: preferredContactMethods.length > 0 ? preferredContactMethods : null,
-    ...contactDetails,
-    
-    // Triggered events tracking
-    triggeredEvents: triggeredEvents.length > 0 ? triggeredEvents : null,
-    
-    // Metadata
+    session_id: data.sessionId || crypto.randomUUID(),
+    environment: import.meta.env.VITE_ENVIRONMENT?.trim() || 'staging',
     total_time_spent: currentTime,
     created_at: new Date().toISOString(),
-    step_completed: step
+    step_completed: step,
+    
+    // Analytics Data
+    triggeredEvents: triggeredEvents.length > 0 ? triggeredEvents : null,
+    
+    // Form Metadata
+    form_version: 'v8.0',
+    is_qualified_lead: isQualifiedLead,
+    page_completed: step,
+    funnel_stage: step === 1 ? 'initial_capture' : 
+                  (isQualifiedLead ? 'counseling_booked' : 'contact_submitted')
   };
 
-  console.log('Sending webhook data:', formattedPayload);
+  console.log('Sending webhook data:', webhookPayload);
   
   // Log the lead category being sent to webhook for tracking
   if (sanitizedCategory) {
@@ -198,7 +146,7 @@ export const submitFormData = async (
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(formattedPayload),
+    body: JSON.stringify(webhookPayload),
   });
 
   // Enhanced error handling with response details
@@ -228,10 +176,16 @@ export const validateForm = async (
   try {
     switch (step) {
       case 1:
-        await personalDetailsSchema.parseAsync(data);
+        await initialLeadCaptureSchema.parseAsync(data);
         break;
       case 2:
-        await academicDetailsSchema.parseAsync(data);
+        // Validate based on lead category
+        const isQualified = ['bch', 'lum-l1', 'lum-l2'].includes(data.lead_category || '');
+        if (isQualified) {
+          await qualifiedLeadSchema.parseAsync(data);
+        } else {
+          await disqualifiedLeadSchema.parseAsync(data);
+        }
         break;
       default:
         throw new Error('Invalid form step');
@@ -260,13 +214,36 @@ export const validateFormStep = (
   try {
     switch (step) {
       case 1:
-        return personalDetailsSchema.safeParse(data).success;
+        return initialLeadCaptureSchema.safeParse(data).success;
       case 2:
-        return academicDetailsSchema.safeParse(data).success;
+        const isQualified = ['bch', 'lum-l1', 'lum-l2'].includes(data.lead_category || '');
+        if (isQualified) {
+          return qualifiedLeadSchema.safeParse(data).success;
+        } else {
+          return disqualifiedLeadSchema.safeParse(data).success;
+        }
       default:
         return false;
     }
   } catch {
     return false;
   }
+};
+
+// Get counselor assignment based on lead category
+export const getCounselorAssignment = (leadCategory: LeadCategory): string | null => {
+  switch (leadCategory) {
+    case 'bch':
+      return 'Viswanathan';
+    case 'lum-l1':
+    case 'lum-l2':
+      return 'Karthik Lakshman';
+    default:
+      return null;
+  }
+};
+
+// Check if lead is qualified for counseling
+export const isQualifiedLead = (leadCategory: LeadCategory): boolean => {
+  return ['bch', 'lum-l1', 'lum-l2'].includes(leadCategory);
 };

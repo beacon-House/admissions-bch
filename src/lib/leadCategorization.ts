@@ -1,17 +1,29 @@
-import { LeadCategory, ExtendedNurtureFormData } from '@/types/form';
+/**
+ * Lead Categorization Logic
+ * 
+ * Purpose: Implements the new simplified lead categorization rules based on
+ * form filler type, grade, scholarship requirements, and target geography.
+ * 
+ * Changes made:
+ * - Implemented new lead categorization rules as specified
+ * - Added global override rules (student forms, spam detection, etc.)
+ * - Added qualified lead categorization (BCH, Luminaire L1, Luminaire L2)
+ * - Default to nurture for all other cases
+ */
+
+import { LeadCategory } from '@/types/form';
 import { validateLeadCategory, logLeadCategoryError } from './dataValidation';
 
 /**
- * Determines the lead category based on categorization logic
+ * Determines the lead category based on new categorization logic
  * 
  * Categories:
  * 1. bch - High priority leads
- * 2. lum-l1 - Medium-high priority luminaire leads
- * 3. lum-l2 - Medium priority luminaire leads
- * 4. masters-l1 - High priority masters leads
- * 5. masters-l2 - Medium priority masters leads
- * 6. nurture - Default category for all others
- * 7. drop - Grade 7 or below, form directly submitted after step 1
+ * 2. lum-l1 - Luminaire Level 1 leads
+ * 3. lum-l2 - Luminaire Level 2 leads
+ * 4. masters - Masters applicants
+ * 5. nurture - Default category for development
+ * 6. drop - Grade 7 or below
  */
 export const determineLeadCategory = (
   currentGrade: string,
@@ -19,161 +31,91 @@ export const determineLeadCategory = (
   scholarshipRequirement: string,
   curriculumType: string,
   targetUniversityRank?: string,
-  // Masters-specific fields
   gpaValue?: string,
   percentageValue?: string,
   intake?: string,
   applicationPreparation?: string,
   targetUniversities?: string,
   supportLevel?: string,
-  // New parameter for Extended Nurture Form data
-  extendedNurtureData?: ExtendedNurtureFormData
+  extendedNurtureData?: any,
+  targetGeographies?: string[]
 ): LeadCategory => {
   let determinedCategory: LeadCategory;
   
-  // NEW RULE: Student-filled forms are always categorized as nurture
+  // GLOBAL OVERRIDE RULES (checked first)
+  
+  // 1. Student form filler → nurture
   if (formFillerType === 'student') {
     determinedCategory = 'nurture';
   }
-  // Filter out spam leads with unrealistic academic scores
+  // 2. Spam detection: GPA = 10 OR percentage = 100 → nurture
   else if (gpaValue === "10" || percentageValue === "100") {
     determinedCategory = 'nurture';
   }
-  // Special case: Grade 7 or below is directly submitted after step 1 and categorized as DROP
+  // 3. Full scholarship requirement → nurture
+  else if (scholarshipRequirement === 'full_scholarship') {
+    determinedCategory = 'nurture';
+  }
+  // 4. Grade 7 or below → drop
   else if (currentGrade === '7_below') {
     determinedCategory = 'drop';
   }
-  // If extended nurture data exists, we need to re-categorize the lead
-  else if (extendedNurtureData) {
-    // Re-categorize based on form filler type and their answers
-    if (formFillerType === 'parent') {
-      const { partialFundingApproach } = extendedNurtureData;
-      
-      // Updated categorization based on new logic:
-      if (partialFundingApproach === 'accept_loans') {
-        determinedCategory = 'lum-l2';
-      } else if (partialFundingApproach === 'affordable_alternatives') {
-        determinedCategory = 'lum-l2';
-      } else {
-        // For defer_scholarships, only_full_funding
-        determinedCategory = 'nurture';
-      }
-    } else if (formFillerType === 'student') {
-      // First check if parentalSupport is "would_join"
-      // If it's anything else, mark as nurture regardless of other answers
-      if (extendedNurtureData.parentalSupport !== 'would_join') {
-        determinedCategory = 'nurture';
-      }
-      
-      const { partialFundingApproach } = extendedNurtureData;
-      
-      // CHANGE: If partialFundingApproach is 'accept_cover_remaining', always categorize as lum-l1 
-      // for grades 11 and 12, regardless of curriculum
-      if (partialFundingApproach === 'accept_cover_remaining') {
-        // Still need to handle grades 9, 10 or grade 11 with top_20 target
-        if (
-          ['8', '9', '10'].includes(currentGrade) ||
-          (currentGrade === '11' && targetUniversityRank === 'top_20' && ['IB', 'IGCSE'].includes(curriculumType))
-        ) {
-          determinedCategory = 'bch';
-        } else if (['11', '12'].includes(currentGrade)) {
-          // CHANGE: Now categorizing as lum-l1 regardless of curriculum type for grades 11/12
-          determinedCategory = 'lum-l1';
-        }
-      } 
-      // CHANGE: Added 'affordable_alternatives' as condition for lum-l2
-      else if (partialFundingApproach === 'defer_external_scholarships' || partialFundingApproach === 'affordable_alternatives') {
-        determinedCategory = 'lum-l2';
-      } else {
-        // For only_full_funding and need_to_ask_parents
-        determinedCategory = 'nurture';
-      }
-    } else {
-      determinedCategory = 'nurture';
-    }
-  }
-  // If we don't have extended nurture data, continue with the original logic
-  else if (scholarshipRequirement === 'full_scholarship' && currentGrade !== 'masters') {
-    // CHANGE: Modified global override to exclude masters applicants
-    // Global override: Full scholarship leads go to NURTURE by default (except masters)
-    determinedCategory = 'nurture';
-  }
-  // MASTERS category evaluation
+  // 5. Masters grade → masters
   else if (currentGrade === 'masters') {
-    // First check if application preparation is "undecided_need_help"
-    // If so, route to NURTURE regardless of other criteria
-    if (applicationPreparation === 'undecided_need_help') {
-      determinedCategory = 'nurture';
+    determinedCategory = 'masters';
+  }
+  
+  // QUALIFIED LEADS (only for parent-filled forms that pass global overrides)
+  else if (formFillerType === 'parent') {
+    
+    // BCH CATEGORY
+    // Rule 1: Grades 8, 9, 10 + parent + scholarship optional/partial
+    if (['8', '9', '10'].includes(currentGrade) && 
+        ['scholarship_optional', 'partial_scholarship'].includes(scholarshipRequirement)) {
+      determinedCategory = 'bch';
+    }
+    // Rule 2: Grade 11 + parent + scholarship optional/partial + target geography US
+    else if (currentGrade === '11' && 
+             ['scholarship_optional', 'partial_scholarship'].includes(scholarshipRequirement) &&
+             targetGeographies?.includes('US')) {
+      determinedCategory = 'bch';
     }
     
-    // Only proceed with masters-l1/masters-l2 evaluation if the user is actually preparing
-    if (applicationPreparation === 'researching_now' || applicationPreparation === 'taken_exams_identified_universities') {
-      // Logic based on target universities
-      if (targetUniversities === 'top_20_50') {
-        determinedCategory = 'masters-l1';
-      } else if (targetUniversities === 'top_50_100' || targetUniversities === 'partner_university') {
-        determinedCategory = 'masters-l2';
-      } else if (targetUniversities === 'unsure') {
-        determinedCategory = 'nurture';
-      } else {
-        determinedCategory = 'nurture';
-      }
-    } else {
+    // LUMINAIRE L1 CATEGORY
+    // Rule 1: Grade 11 + parent + scholarship optional + target geography UK/Rest of World/Need Guidance
+    else if (currentGrade === '11' && 
+             scholarshipRequirement === 'scholarship_optional' &&
+             targetGeographies?.some(geo => ['UK', 'Rest of World', 'Need Guidance'].includes(geo))) {
+      determinedCategory = 'lum-l1';
+    }
+    // Rule 2: Grade 12 + parent + scholarship optional
+    else if (currentGrade === '12' && 
+             scholarshipRequirement === 'scholarship_optional') {
+      determinedCategory = 'lum-l1';
+    }
+    
+    // LUMINAIRE L2 CATEGORY
+    // Rule 1: Grade 11 + parent + partial scholarship + target geography UK/Rest of World/Need Guidance
+    else if (currentGrade === '11' && 
+             scholarshipRequirement === 'partial_scholarship' &&
+             targetGeographies?.some(geo => ['UK', 'Rest of World', 'Need Guidance'].includes(geo))) {
+      determinedCategory = 'lum-l2';
+    }
+    // Rule 2: Grade 12 + parent + partial scholarship
+    else if (currentGrade === '12' && 
+             scholarshipRequirement === 'partial_scholarship') {
+      determinedCategory = 'lum-l2';
+    }
+    
+    // DEFAULT: All other parent-filled forms → nurture
+    else {
       determinedCategory = 'nurture';
     }
   }
-  // BCH category
-  // Case 1: Grade 9 or 10, parent-filled form, scholarship not required or partial
-  else if (
-    ['8', '9', '10'].includes(currentGrade) &&
-    formFillerType === 'parent' &&
-    (scholarshipRequirement === 'scholarship_optional' || scholarshipRequirement === 'partial_scholarship')
-  ) {
-    determinedCategory = 'bch';
-  }
-  // Case 2: Grade 11, parent or IB/IGCSE student, scholarship not required or partial, top-20 target
-  else if (
-    currentGrade === '11' &&
-    (scholarshipRequirement === 'scholarship_optional' || scholarshipRequirement === 'partial_scholarship') &&
-    targetUniversityRank === 'top_20' &&
-    (
-      formFillerType === 'parent' || 
-      (formFillerType === 'student' && ['IB', 'IGCSE'].includes(curriculumType))
-    )
-  ) {
-    determinedCategory = 'bch';
-  }
+  
+  // DEFAULT: All other cases → nurture
   else {
-    // Check for lum-l1 or lum-l2 eligibility based on school year and curriculum
-    const isEligibleForLuminaire = (
-    ['11', '12'].includes(currentGrade) &&
-    (
-      formFillerType === 'parent' || 
-      (formFillerType === 'student' && ['IB', 'IGCSE'].includes(curriculumType))
-    )
-    );
-
-    if (isEligibleForLuminaire) {
-      // Luminaire Level 1 (lum-l1) - scholarship_optional
-      if (scholarshipRequirement === 'scholarship_optional') {
-        // For Grade 11, must NOT have top_20 target (those go to BCH)
-        if (currentGrade === '11' && targetUniversityRank === 'top_20') {
-          // Skip since this would go to BCH (handled above)
-          determinedCategory = 'nurture';
-        } else {
-          determinedCategory = 'lum-l1';
-        }
-      }
-      // Luminaire Level 2 (lum-l2) - partial_scholarship
-      else if (scholarshipRequirement === 'partial_scholarship') {
-        determinedCategory = 'lum-l2';
-      } else {
-        determinedCategory = 'nurture';
-      }
-    } else {
-      // Default: NURTURE for all other cases
-      determinedCategory = 'nurture';
-    }
+    determinedCategory = 'nurture';
   }
   
   // Validate the determined category
@@ -188,8 +130,9 @@ export const determineLeadCategory = (
         formFillerType,
         scholarshipRequirement,
         curriculumType,
-        targetUniversityRank,
-        extendedNurtureData
+        targetGeographies,
+        gpaValue,
+        percentageValue
       }
     );
     // Fallback to nurture if categorization fails
@@ -197,4 +140,4 @@ export const determineLeadCategory = (
   }
   
   return determinedCategory;
-}
+};

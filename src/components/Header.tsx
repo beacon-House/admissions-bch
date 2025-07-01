@@ -1,7 +1,17 @@
+/**
+ * Header Component v8.0
+ * 
+ * Purpose: Site navigation header with CTA button tracking using new Meta Pixel events.
+ * 
+ * Changes made:
+ * - Updated to use new Meta Pixel event tracking system
+ * - Implemented CTA_HEADER event firing
+ */
+
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { trackPixelEvent, PIXEL_EVENTS } from '@/lib/pixel';
+import { fireCTAEvents } from '@/lib/pixel';
 
 interface HeaderProps {
   onEvaluation?: () => void;
@@ -14,14 +24,12 @@ export function Header({ onEvaluation, showCTA = true }: HeaderProps) {
   const [isMobile, setIsMobile] = useState(false);
 
   const handleCTAClick = () => {
-    trackPixelEvent({
-      name: PIXEL_EVENTS.CTA_HEADER,
-      options: { 
-        button: 'header_request_evaluation',
-        device_type: isMobile ? 'mobile' : 'desktop',
-        path: window.location.pathname,
-        timestamp: new Date().toISOString()
-      }
+    // FIRE META PIXEL CTA HEADER EVENT
+    fireCTAEvents('header', { 
+      button: 'header_request_evaluation',
+      device_type: isMobile ? 'mobile' : 'desktop',
+      path: window.location.pathname,
+      timestamp: new Date().toISOString()
     });
     
     if (onEvaluation) {

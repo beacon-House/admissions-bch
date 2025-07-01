@@ -1,3 +1,16 @@
+/**
+ * Form Store v8.0
+ * 
+ * Purpose: Zustand store for managing simplified 2-page form state.
+ * Handles form data, step navigation, and submission status.
+ * 
+ * Changes made:
+ * - Updated for simplified form structure
+ * - Added sessionId tracking
+ * - Simplified validation logic
+ * - Updated form data types
+ */
+
 import { create } from 'zustand';
 import { CompleteFormData } from '@/types/form';
 import { validateFormStep } from '@/lib/form';
@@ -57,5 +70,11 @@ export const useFormStore = create<FormState>((set, get) => ({
     sessionId: generateSessionId()
   }),
   
-  canProceed: (step) => validateFormStep(step, get().formData)
+  canProceed: (step) => {
+    try {
+      return validateFormStep(step, get().formData);
+    } catch {
+      return false;
+    }
+  }
 }));

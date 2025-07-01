@@ -104,6 +104,32 @@
   .text-sm.text-red-500 {
     @apply italic;
   }
+
+  /* Sticky submit button spacing */
+  .pb-24 {
+    padding-bottom: 6rem;
+  }
+
+  /* Prevent body scroll when sticky elements are present */
+  body:has(.fixed.bottom-0) {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  
+  /* Slide up animation for sticky buttons */
+  @keyframes slide-up {
+    from {
+      transform: translateY(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+  
+  .animate-slide-up {
+    animation: slide-up 0.3s ease-out forwards;
+  }
 }
 
 @layer components {

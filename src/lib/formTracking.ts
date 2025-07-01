@@ -1,14 +1,14 @@
 /**
- * Form Funnel Tracking Utility
+ * Form Funnel Tracking Utility v8.1
  * 
- * Purpose: Provides background form funnel tracking functionality to capture user journey
- * through the multi-step form. Tracks each step completion and form data without affecting
- * user experience or form functionality.
+ * Purpose: Provides incremental form tracking for progressive data saving.
+ * Saves form data after each section completion to ensure no data loss.
  * 
  * Changes made:
- * - Updated to use Supabase instead of Neon
- * - Maintained all existing tracking logic and data structure
- * - Updated database insertion method for Supabase
+ * - Implemented incremental data saving using upsert function
+ * - Added session-based tracking with proper data persistence
+ * - Maintains session ID consistency across all interactions
+ * - Progressive form data building with each step
  */
 
 import { supabase } from './database';
@@ -29,218 +29,204 @@ const getEnvironment = (): string => {
   return import.meta.env.VITE_ENVIRONMENT?.trim() || 'staging';
 };
 
-// Interface for tracking data
-interface FormTrackingData {
-  session_id: string;
-  step_number: number;
-  step_type: string;
-  environment: string;
-  user_agent: string;
-  
-  // Personal details
-  student_first_name?: string;
-  student_last_name?: string;
-  parent_name?: string;
-  area_of_residence?: string;
-  email?: string;
-  phone_number?: string;
-  whatsapp_consent?: boolean;
-  current_grade?: string;
-  form_filler_type?: string;
-  
-  // Academic details (regular)
-  curriculum_type?: string;
-  school_name?: string;
-  grade_format?: string;
-  gpa_value?: string;
-  percentage_value?: string;
-  target_university_rank?: string;
-  preferred_countries?: string; // JSON string
-  scholarship_requirement?: string;
-  
-  // Masters details
-  graduation_status?: string;
-  intake?: string;
-  intake_other?: string;
-  work_experience?: string;
-  field_of_study?: string;
-  entrance_exam?: string;
-  exam_score?: string;
-  application_preparation?: string;
-  target_universities?: string;
-  support_level?: string;
-  
-  // Extended nurture
-  partial_funding_approach?: string;
-  strong_profile_intent?: string;
-  
-  // Contact methods
-  preferred_contact_methods?: string; // JSON string
-  call_number?: string;
-  whatsapp_number?: string;
-  email_address?: string;
-  
-  // Counselling
-  counselling_slot_picked?: boolean;
-  counselling_date?: string;
-  counselling_time?: string;
-  
-  // Metadata
-  lead_category?: string;
-  total_time_spent?: number;
-  step_completed: number;
-  created_at?: string;
-}
+// Funnel stages
+export type FunnelStage = 'initial_capture' | 'counseling_booked' | 'contact_submitted' | 'abandoned';
 
 /**
- * Track form step completion
- * Fire-and-forget async function that logs errors but doesn't throw
+ * Save form data incrementally using the upsert function
+ * This ensures data is preserved at each step of the form
  */
-export const trackFormStep = async (
+export const saveFormDataIncremental = async (
   sessionId: string,
   stepNumber: number,
   stepType: string,
   formData: any
 ): Promise<void> => {
   try {
-    // Validate and sanitize lead category before processing
+    // Validate and sanitize lead category if present
     const originalCategory = formData.lead_category;
-    const sanitizedCategory = sanitizeLeadCategory(originalCategory);
+    let sanitizedCategory = originalCategory;
     
-    // Only perform lead category validation if category is not null
-    // This prevents validation errors during early steps where category hasn't been determined yet
-    if (sanitizedCategory !== null) {
+    if (originalCategory) {
+      sanitizedCategory = sanitizeLeadCategory(originalCategory);
+      
       if (originalCategory && !sanitizedCategory) {
         logLeadCategoryError(
-          'Form Tracking - Invalid Category',
+          'Incremental Save - Invalid Category',
           originalCategory,
           sessionId,
           { stepNumber, stepType }
         );
       }
-      
-      // Validate complete form data consistency only when category exists
-      const consistencyCheck = validateFormDataConsistency({
-        ...formData,
-        lead_category: sanitizedCategory
-      });
-      
-      if (!consistencyCheck.isValid) {
-        logLeadCategoryError(
-          'Form Tracking - Data Consistency',
-          sanitizedCategory,
-          sessionId,
-          { 
-            errors: consistencyCheck.errors,
-            warnings: consistencyCheck.warnings,
-            stepNumber,
-            stepType 
-          }
-        );
-      }
     }
-    
-    const trackingData: FormTrackingData = {
-      session_id: sessionId,
-      step_number: stepNumber,
-      step_type: stepType,
-      environment: getEnvironment(),
-      user_agent: navigator.userAgent,
-      
-      // Personal details
-      student_first_name: formData.studentFirstName,
-      student_last_name: formData.studentLastName,
-      parent_name: formData.parentName,
-      area_of_residence: formData.areaOfResidence,
-      email: formData.email,
-      phone_number: formData.phoneNumber,
-      whatsapp_consent: formData.whatsappConsent,
-      current_grade: formData.currentGrade,
-      form_filler_type: formData.formFillerType,
-      
-      // Academic details (regular)
-      curriculum_type: formData.curriculumType,
-      school_name: formData.schoolName,
-      grade_format: formData.gradeFormat,
-      gpa_value: formData.gpaValue,
-      percentage_value: formData.percentageValue,
-      target_university_rank: formData.targetUniversityRank,
-      preferred_countries: formData.preferredCountries ? JSON.stringify(formData.preferredCountries) : null,
-      scholarship_requirement: formData.scholarshipRequirement,
-      
-      // Masters details
-      graduation_status: formData.graduationStatus,
-      intake: formData.intake,
-      intake_other: formData.intakeOther,
-      work_experience: formData.workExperience,
-      field_of_study: formData.fieldOfStudy,
-      entrance_exam: formData.entranceExam,
-      exam_score: formData.examScore,
-      application_preparation: formData.applicationPreparation,
-      target_universities: formData.targetUniversities,
-      support_level: formData.supportLevel,
-      
-      // Extended nurture
-      partial_funding_approach: formData.extendedNurture?.partialFundingApproach,
-      strong_profile_intent: formData.extendedNurture?.strongProfileIntent,
-      
-      // Contact methods
-      preferred_contact_methods: formData.contactMethods ? JSON.stringify({
-        call: formData.contactMethods.call,
-        whatsapp: formData.contactMethods.whatsapp,
-        email: formData.contactMethods.email
-      }) : null,
-      call_number: formData.contactMethods?.callNumber,
-      whatsapp_number: formData.contactMethods?.whatsappNumber,
-      email_address: formData.contactMethods?.emailAddress,
-      
-      // Counselling
-      counselling_slot_picked: formData.counselling?.selectedDate ? true : false,
-      counselling_date: formData.counselling?.selectedDate,
-      counselling_time: formData.counselling?.selectedSlot,
-      
-      // Metadata
+
+    // Prepare form data for database storage
+    const dbFormData = {
+      ...formData,
       lead_category: sanitizedCategory,
-      total_time_spent: formData.totalTimeSpent || Math.floor((Date.now() - (formData.startTime || Date.now())) / 1000),
-      step_completed: stepNumber,
-      created_at: new Date().toISOString()
+      sessionId: sessionId,
+      total_time_spent: Math.floor((Date.now() - (formData.startTime || Date.now())) / 1000),
+      triggeredEvents: formData.triggeredEvents || []
     };
 
-    // Insert tracking data into Supabase
+    // Use the upsert function to save/update data
+    const { data, error } = await supabase.rpc('upsert_form_session', {
+      p_session_id: sessionId,
+      p_step_number: stepNumber,
+      p_step_type: stepType,
+      p_environment: getEnvironment(),
+      p_user_agent: navigator.userAgent,
+      p_form_data: dbFormData
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    console.log(`✅ Form data saved incrementally: Step ${stepNumber} (${stepType}) for session ${sessionId}`);
+    
+  } catch (error) {
+    console.error('❌ Incremental form save error:', error);
+    // Don't throw - form should continue working even if tracking fails
+  }
+};
+
+/**
+ * Track form section completion with incremental saving
+ * This replaces the old trackStep function with proper data persistence
+ */
+export const trackFormSection = async (
+  sessionId: string,
+  sectionName: string,
+  sectionData: any,
+  currentStep: number
+): Promise<void> => {
+  try {
+    console.log(`📝 Tracking form section: ${sectionName} for session ${sessionId}`);
+    
+    // Save the data incrementally
+    await saveFormDataIncremental(
+      sessionId,
+      currentStep,
+      sectionName,
+      sectionData
+    );
+    
+  } catch (error) {
+    console.error('Form section tracking error:', error);
+    // Silent error - don't break form flow
+  }
+};
+
+/**
+ * Track form page completion
+ */
+export const trackPageCompletion = async (
+  sessionId: string,
+  pageNumber: number,
+  pageType: string,
+  formData: any
+): Promise<void> => {
+  try {
+    console.log(`📄 Tracking page completion: Page ${pageNumber} (${pageType}) for session ${sessionId}`);
+    
+    // Save complete page data
+    await saveFormDataIncremental(
+      sessionId,
+      pageNumber,
+      pageType,
+      formData
+    );
+    
+  } catch (error) {
+    console.error('Page completion tracking error:', error);
+  }
+};
+
+/**
+ * Track final form submission
+ */
+export const trackFormSubmission = async (
+  sessionId: string,
+  formData: any,
+  isComplete: boolean = true
+): Promise<void> => {
+  try {
+    console.log(`🎯 Tracking form submission for session ${sessionId}`);
+    
+    // Mark as final submission
+    const finalData = {
+      ...formData,
+      is_final_submission: isComplete,
+      submission_timestamp: new Date().toISOString()
+    };
+    
+    await saveFormDataIncremental(
+      sessionId,
+      formData.currentStep || 2,
+      'final_submission',
+      finalData
+    );
+    
+  } catch (error) {
+    console.error('Form submission tracking error:', error);
+  }
+};
+
+/**
+ * Get form data for a session (for recovery purposes)
+ */
+export const getSessionData = async (sessionId: string): Promise<any> => {
+  try {
     const { data, error } = await supabase
       .from('form_sessions')
-      .insert([trackingData])
-      .select();
+      .select('*')
+      .eq('session_id', sessionId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      throw error;
+    }
+
+    return data?.[0] || null;
+  } catch (error) {
+    console.error('Failed to get session data:', error);
+    return null;
+  }
+};
+
+/**
+ * Track funnel abandonment
+ */
+export const trackFunnelAbandonment = async (
+  sessionId: string,
+  currentPage: number,
+  timeSpent: number
+): Promise<void> => {
+  try {
+    const { error } = await supabase
+      .from('form_sessions')
+      .update({
+        funnel_stage: 'abandoned',
+        total_time_spent: timeSpent,
+        updated_at: new Date().toISOString()
+      })
+      .eq('session_id', sessionId);
 
     if (error) {
       throw error;
     }
     
-    // Validate that the data was saved correctly
-    if (data && data[0]) {
-      const savedCategory = data[0].lead_category;
-      if (sanitizedCategory && savedCategory !== sanitizedCategory) {
-        logLeadCategoryError(
-          'Form Tracking - Save Mismatch',
-          { intended: sanitizedCategory, saved: savedCategory },
-          sessionId,
-          { stepNumber, stepType, trackingData }
-        );
-      }
-    }
-
-    console.log(`Form tracking: Step ${stepNumber} (${stepType}) tracked for session ${sessionId}`);
+    console.log(`Funnel abandonment tracked for session ${sessionId} at page ${currentPage}`);
     
   } catch (error) {
-    // Silent error handling - log but don't throw
-    console.error('Form tracking error:', error);
-    // Form must continue working even if tracking fails
+    console.error('Abandonment tracking error:', error);
   }
 };
 
 /**
- * Track form step with simplified interface
- * Used for direct calls from form components
+ * Legacy function for backward compatibility
  */
 export const trackStep = (
   sessionId: string,
@@ -249,5 +235,57 @@ export const trackStep = (
   formData: any
 ): void => {
   // Fire and forget - don't await
-  trackFormStep(sessionId, stepNumber, stepType, formData);
+  saveFormDataIncremental(sessionId, stepNumber, stepType, formData);
+};
+
+/**
+ * Get funnel analytics data
+ */
+export const getFunnelAnalytics = async (
+  timeRange: 'day' | 'week' | 'month' = 'week'
+): Promise<any> => {
+  try {
+    const now = new Date();
+    const timeRangeMs = {
+      day: 24 * 60 * 60 * 1000,
+      week: 7 * 24 * 60 * 60 * 1000,
+      month: 30 * 24 * 60 * 60 * 1000
+    };
+
+    const startTime = new Date(now.getTime() - timeRangeMs[timeRange]);
+
+    // Get funnel stage distribution
+    const { data: funnelData, error: funnelError } = await supabase
+      .from('form_sessions')
+      .select('funnel_stage, lead_category, is_qualified_lead, page_completed')
+      .gte('created_at', startTime.toISOString())
+      .eq('environment', getEnvironment());
+
+    if (funnelError) {
+      throw funnelError;
+    }
+
+    // Calculate conversion rates
+    const totalSessions = funnelData?.length || 0;
+    const page1Completions = funnelData?.filter(d => d.page_completed >= 1).length || 0;
+    const page2Completions = funnelData?.filter(d => d.page_completed >= 2).length || 0;
+    const qualifiedLeads = funnelData?.filter(d => d.is_qualified_lead).length || 0;
+    const counselingBooked = funnelData?.filter(d => d.funnel_stage === 'counseling_booked').length || 0;
+
+    return {
+      totalSessions,
+      conversionRates: {
+        page1ToPage2: totalSessions > 0 ? (page2Completions / totalSessions) * 100 : 0,
+        overallCompletion: totalSessions > 0 ? (page2Completions / totalSessions) * 100 : 0,
+        qualificationRate: totalSessions > 0 ? (qualifiedLeads / totalSessions) * 100 : 0,
+        counselingBookingRate: qualifiedLeads > 0 ? (counselingBooked / qualifiedLeads) * 100 : 0
+      },
+      timeRange,
+      generatedAt: new Date().toISOString()
+    };
+
+  } catch (error) {
+    console.error('Failed to get funnel analytics:', error);
+    return null;
+  }
 };

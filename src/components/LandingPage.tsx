@@ -1,24 +1,32 @@
+/**
+ * Landing Page Component v8.0
+ * 
+ * Purpose: Main landing page with hero section and CTA tracking using new Meta Pixel events.
+ * 
+ * Changes made:
+ * - Updated to use new Meta Pixel event tracking system
+ * - Implemented CTA_HERO event firing
+ */
+
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSwipeable } from 'react-swipeable';
 import { Trophy, GraduationCap, Users, DollarSign, Award, BarChart3, BookOpen, Briefcase, CheckCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { trackPixelEvent, PIXEL_EVENTS } from '@/lib/pixel';
+import { fireCTAEvents } from '@/lib/pixel';
 import { Header } from './Header';
 
 export default function LandingPage() {
   const navigate = useNavigate();
 
   const handleScrollToForm = () => {
-    trackPixelEvent({
-      name: PIXEL_EVENTS.CTA_HERO,
-      options: { 
-        button: 'request_evaluation',
-        location: 'hero_section',
-        device_type: window.innerWidth < 768 ? 'mobile' : 'desktop',
-        scroll_position: window.scrollY,
-        timestamp: new Date().toISOString()
-      }
+    // FIRE META PIXEL CTA HERO EVENT
+    fireCTAEvents('hero', { 
+      button: 'request_evaluation',
+      location: 'hero_section',
+      device_type: window.innerWidth < 768 ? 'mobile' : 'desktop',
+      scroll_position: window.scrollY,
+      timestamp: new Date().toISOString()
     });
     
     navigate('/application-form');
